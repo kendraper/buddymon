@@ -19,10 +19,6 @@ import (
 const buddyPath = "proc_buddyinfo.txt"
 const assertFieldCount = 15 // requisite fields in each buddyinfo line
 
-var config struct {
-	Filename string
-}
-
 // InfluxSettings stores the required configuration to write data points to InfluxDB.
 type InfluxSettings struct {
 	URL         string
@@ -33,6 +29,7 @@ type InfluxSettings struct {
 	GlobalTags  map[string]string
 }
 
+// Global config.
 var influxConfig InfluxSettings
 
 // BuddyEntry binds a set of page entries to node number and zone.
@@ -51,8 +48,7 @@ func init() {
 	pflag.StringP("user", "u", "", "InfluxDB username for writing")
 	pflag.StringP("password", "p", "", "InfluxDB password for user authentication")
 	pflag.StringP("measurement", "m", "buddyinfo", "InfluxDB measurement name to write")
-	tags := pflag.StringSliceP("tags", "t", nil, "InfluxDB tags to add, e.g. host=mycomputer (multiple -t or commas ok)")
-	// tags := pflag.StringSliceP("tags", "t", []string{}, "InfluxDB tags to add, e.g. host=mycomputer (multiple -t or commas ok)")
+	tags := pflag.StringSliceP("tags", "t", []string{}, "InfluxDB tags to add, e.g. host=mycomputer (multiple -t or commas ok)")
 	pflag.Parse()
 
 	viper.BindPFlags(pflag.CommandLine)
@@ -81,9 +77,8 @@ func init() {
 	influxConfig.User = viper.GetString("user")
 	influxConfig.Password = viper.GetString("password")
 	influxConfig.Measurement = viper.GetString("measurement")
+
 	influxConfig.GlobalTags = viper.GetStringMapString("tags")
-	log.Printf("[0]PflagTags: %q\n", tags)
-	log.Printf("[0]ViperTags: %q\n", influxConfig.GlobalTags)
 	if len(influxConfig.GlobalTags) == 0 {
 		// Build tags from command line -t if we received them (key=val strings).
 		if len(*tags) > 0 {
@@ -98,12 +93,12 @@ func init() {
 			}
 		}
 	}
-	log.Printf("[1]ResultTags: %q\n", influxConfig.GlobalTags)
+	log.Printf("[1]GlobalTags: %q\n", influxConfig.GlobalTags)
+
+	// TODO: Check for required options
 
 	allSettings := viper.AllSettings()
-	log.Printf("Settings: %q\n", allSettings)
-
-	log.Printf("Configuration: %+v\n", config)
+	log.Printf("ViperSettings: %q\n", allSettings)
 }
 
 func main() {
@@ -112,14 +107,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// var tags map[string]string
-	// var fields map[string]interface{}
-
 	var batch []BuddyEntry
 	for _, line := range lines {
 		entry := makeBuddyEntry(line)
-		// log.Printf("fields %v\n", fields)
-		// log.Printf("tags %v\n", tags)
 		log.Printf("entry %v\n", entry)
 		batch = append(batch, entry)
 	}
@@ -205,12 +195,7 @@ func makeBuddyEntry(line string) (entry BuddyEntry) {
 	entry.Node = string(node)
 	entry.Zone = string(zone)
 	entry.Pages = make(map[string]interface{})
-	// influxTags := map[string]string{
-	// 	"node": string(node),
-	// 	"zone": string(zone),
-	// }
 
-	// influxFields := make(map[string]interface{})
 	pageOrder := 1
 	for _, p := range pages {
 		name := fmt.Sprintf("%dp", pageOrder)
@@ -219,7 +204,6 @@ func makeBuddyEntry(line string) (entry BuddyEntry) {
 		pageOrder *= 2
 	}
 
-	// return influxTags, influxFields
 	return entry
 }
 
