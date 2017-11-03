@@ -141,6 +141,12 @@ func updateInflux(influx InfluxSettings, batch []BuddyEntry) {
 	// prevent multiple points from clobbering each other.
 	// Since time.Now() does not have nanosecond precision on all OSes, running
 	// it in a loop can easily net identical times.
+	//
+	// NOTE: Now storing node/zone as tags instead of fields, which should
+	// prevent the overwrite, but it doesn't hurt to leave the increment in just
+	// in case.
+	//
+	// See https://docs.influxdata.com/influxdb/v1.3/troubleshooting/frequently-asked-questions/#how-does-influxdb-handle-duplicate-points
 	t := time.Now()
 
 	// Add a point for each field set in the batch.
@@ -176,7 +182,7 @@ Node 0, zone   Normal  23821   5715     90     16      8      4      9      2   
 Node 1, zone   Normal   3888  10304    405    139     50     59     38     19      4      2      9
 */
 
-// Given a buddyinfo line, returns both a key and field map for InfluxDB.
+// Given a buddyinfo line, returns a field map for InfluxDB with node and zone.
 // Node number and zone should be handled as tags and not fields, since those
 // may be frequently queried (fields are not indexed).
 func makeBuddyEntry(line string) (entry BuddyEntry) {
@@ -196,11 +202,11 @@ func makeBuddyEntry(line string) (entry BuddyEntry) {
 	entry.Zone = string(zone)
 	entry.Pages = make(map[string]interface{})
 
+	// See proc(5) for info on order (search buddyinfo).
 	pageOrder := 1
 	for _, p := range pages {
 		name := fmt.Sprintf("%dp", pageOrder)
 		entry.Pages[name] = string(p)
-		// influxFields[name] = string(p)
 		pageOrder *= 2
 	}
 
