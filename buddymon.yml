@@ -1,7 +1,0 @@
----
-url: http://bink:8086
-database: buddyinfo
-measurement: buddyinfo
-tags:
-  host: "pyramid"
-  cluster: "mycluster"
