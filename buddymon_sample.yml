@@ -1,0 +1,8 @@
+---
+url: http://localhost:8086
+database: buddyinfo
+user: influxuser
+password: influxpassword
+measurement: buddyinfo
+tags:
+  host: "myhost"
