@@ -1,6 +1,7 @@
 ---
-series: buddyinfo_alt
 url: http://bink:8086
+database: buddyinfo
+measurement: buddyinfo
 tags:
-  hostname: "mostname"
-  lastname: "Draper"
+  host: "pyramid"
+  cluster: "mycluster"

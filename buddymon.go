@@ -20,19 +20,39 @@ const buddyPath = "proc_buddyinfo.txt"
 const assertFieldCount = 15 // requisite fields in each buddyinfo line
 
 var config struct {
-	Filename     string
-	InfluxSeries string
-	InfluxTags   map[string]interface{}
-	InfluxURL    string
+	Filename string
+}
+
+// InfluxSettings stores the required configuration to write data points to InfluxDB.
+type InfluxSettings struct {
+	URL         string
+	Database    string
+	User        string
+	Password    string
+	Measurement string // Measurement name in "SELECT ___ FROM measurement_name"
+	GlobalTags  map[string]string
+}
+
+var influxConfig InfluxSettings
+
+// BuddyEntry binds a set of page entries to node number and zone.
+type BuddyEntry struct {
+	Pages map[string]interface{} // Matches fields arg of InfluxDB data point.
+	Node  string
+	Zone  string
 }
 
 func init() {
 	viper.SetConfigName("buddymon")
 
 	pflag.StringP("config", "c", "", "Config file path (default searches /etc/buddymon, $HOME/buddymon, $PWD)")
-	pflag.StringP("series", "s", "buddyinfo", "InfluxDB series name to update")
-	pflag.StringP("url", "u", "http://localhost:8086", "InfluxDB URL")
+	pflag.StringP("url", "U", "http://localhost:8086", "InfluxDB server URL")
+	pflag.StringP("database", "d", "buddyinfo", "InfluxDB database name to use")
+	pflag.StringP("user", "u", "", "InfluxDB username for writing")
+	pflag.StringP("password", "p", "", "InfluxDB password for user authentication")
+	pflag.StringP("measurement", "m", "buddyinfo", "InfluxDB measurement name to write")
 	tags := pflag.StringSliceP("tags", "t", nil, "InfluxDB tags to add, e.g. host=mycomputer (multiple -t or commas ok)")
+	// tags := pflag.StringSliceP("tags", "t", []string{}, "InfluxDB tags to add, e.g. host=mycomputer (multiple -t or commas ok)")
 	pflag.Parse()
 
 	viper.BindPFlags(pflag.CommandLine)
@@ -55,12 +75,17 @@ func init() {
 		})
 	}
 
-	allSettings := viper.AllSettings()
-	log.Printf("Settings: %q\n", allSettings)
-
-	config.InfluxTags = viper.GetStringMap("tags")
-	if len(config.InfluxTags) == 0 {
-		// Build tags from command line -t
+	// Set config options.
+	influxConfig.URL = viper.GetString("url")
+	influxConfig.Database = viper.GetString("database")
+	influxConfig.User = viper.GetString("user")
+	influxConfig.Password = viper.GetString("password")
+	influxConfig.Measurement = viper.GetString("measurement")
+	influxConfig.GlobalTags = viper.GetStringMapString("tags")
+	log.Printf("[0]PflagTags: %q\n", tags)
+	log.Printf("[0]ViperTags: %q\n", influxConfig.GlobalTags)
+	if len(influxConfig.GlobalTags) == 0 {
+		// Build tags from command line -t if we received them (key=val strings).
 		if len(*tags) > 0 {
 			for _, tagset := range *tags {
 				tag := strings.SplitN(tagset, "=", 2)
@@ -69,11 +94,16 @@ func init() {
 					pflag.Usage()
 					os.Exit(8)
 				}
-				config.InfluxTags[tag[0]] = tag[1]
+				influxConfig.GlobalTags[tag[0]] = tag[1]
 			}
 		}
 	}
-	log.Printf("Tags: %q\n", config.InfluxTags)
+	log.Printf("[1]ResultTags: %q\n", influxConfig.GlobalTags)
+
+	allSettings := viper.AllSettings()
+	log.Printf("Settings: %q\n", allSettings)
+
+	log.Printf("Configuration: %+v\n", config)
 }
 
 func main() {
@@ -82,40 +112,64 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// var tags map[string]string
+	// var fields map[string]interface{}
+
+	var batch []BuddyEntry
 	for _, line := range lines {
-		fields := getInfluxEntry(line)
-		log.Printf("fields %v\n", fields)
-		tags := map[string]string{"cpu": "cpu-total"}
-		updateInflux(tags, fields, "http://bink:8086")
+		entry := makeBuddyEntry(line)
+		// log.Printf("fields %v\n", fields)
+		// log.Printf("tags %v\n", tags)
+		log.Printf("entry %v\n", entry)
+		batch = append(batch, entry)
 	}
+	log.Printf("batch %v\n", batch)
+	updateInflux(influxConfig, batch)
 }
 
-func updateInflux(tags map[string]string, fields map[string]interface{}, url string) {
+// func updateInflux(tags map[string]string, fields map[string]interface{}, url string) {
+func updateInflux(influx InfluxSettings, batch []BuddyEntry) {
 	c, err := client.NewHTTPClient(client.HTTPConfig{
-		Addr:     url,
-		Username: "",
-		Password: "",
+		Addr:     influx.URL,
+		Username: influx.User,
+		Password: influx.Password,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Create a new point batch
+	// Create a new point batch.
 	bp, err := client.NewBatchPoints(client.BatchPointsConfig{
-		Database:  "buddyinfo",
-		Precision: "s",
+		Database:  influx.Database,
+		Precision: "ns",
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	pt, err := client.NewPoint("cpu_usage", tags, fields, time.Now())
-	if err != nil {
-		log.Fatal(err)
-	}
-	bp.AddPoint(pt)
+	// Time will be incremented by a nanosecond per each data point, to
+	// prevent multiple points from clobbering each other.
+	// Since time.Now() does not have nanosecond precision on all OSes, running
+	// it in a loop can easily net identical times.
+	t := time.Now()
 
-	// Write the batch
+	// Add a point for each field set in the batch.
+	for _, entry := range batch {
+		// Add provided tags where applicable.
+		tags := influx.GlobalTags
+		tags["node"] = entry.Node
+		tags["zone"] = entry.Zone
+
+		pt, err := client.NewPoint(influx.Measurement, tags, entry.Pages, t)
+		if err != nil {
+			log.Fatal(err)
+		}
+		bp.AddPoint(pt)
+
+		t = t.Add(time.Nanosecond)
+	}
+
+	// Write the batch.
 	if err := c.Write(bp); err != nil {
 		log.Fatal(err)
 	}
@@ -132,8 +186,10 @@ Node 0, zone   Normal  23821   5715     90     16      8      4      9      2   
 Node 1, zone   Normal   3888  10304    405    139     50     59     38     19      4      2      9
 */
 
-// Given a buddyinfo line, returns a field map for InfluxDB.
-func getInfluxEntry(line string) map[string]interface{} {
+// Given a buddyinfo line, returns both a key and field map for InfluxDB.
+// Node number and zone should be handled as tags and not fields, since those
+// may be frequently queried (fields are not indexed).
+func makeBuddyEntry(line string) (entry BuddyEntry) {
 	fields := strings.Fields(line)
 	n := len(fields)
 	if n != assertFieldCount {
@@ -145,17 +201,25 @@ func getInfluxEntry(line string) map[string]interface{} {
 	zone := fields[3]    // zone type, e.g. Normal
 	pages := fields[4:]  // all subsequent fragment counts
 
-	entry := map[string]interface{}{
-		"node": string(node),
-		"zone": string(zone),
-	}
+	entry = BuddyEntry{}
+	entry.Node = string(node)
+	entry.Zone = string(zone)
+	entry.Pages = make(map[string]interface{})
+	// influxTags := map[string]string{
+	// 	"node": string(node),
+	// 	"zone": string(zone),
+	// }
+
+	// influxFields := make(map[string]interface{})
 	pageOrder := 1
 	for _, p := range pages {
 		name := fmt.Sprintf("%dp", pageOrder)
-		entry[name] = string(p)
+		entry.Pages[name] = string(p)
+		// influxFields[name] = string(p)
 		pageOrder *= 2
 	}
 
+	// return influxTags, influxFields
 	return entry
 }
 
