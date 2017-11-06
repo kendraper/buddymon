@@ -5,13 +5,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"os"
 	"strings"
 	"time"
-
-	"github.com/fsnotify/fsnotify"
-	"github.com/spf13/pflag"
-	"github.com/spf13/viper"
 
 	"github.com/influxdata/influxdb/client/v2"
 )
@@ -19,86 +14,17 @@ import (
 const buddyPath = "proc_buddyinfo.txt"
 const assertFieldCount = 15 // requisite fields in each buddyinfo line
 
-// InfluxSettings stores the required configuration to write data points to InfluxDB.
-type InfluxSettings struct {
-	URL         string
-	Database    string
-	User        string
-	Password    string
-	Measurement string // Measurement name in "SELECT ___ FROM measurement_name"
-	GlobalTags  map[string]string
-}
-
-// Global config.
 var influxConfig InfluxSettings
+
+func init() {
+	influxConfig = getConfig()
+}
 
 // BuddyEntry binds a set of page entries to node number and zone.
 type BuddyEntry struct {
 	Pages map[string]interface{} // Matches fields arg of InfluxDB data point.
 	Node  string
 	Zone  string
-}
-
-func init() {
-	viper.SetConfigName("buddymon")
-
-	pflag.StringP("config", "c", "", "Config file path (default searches /etc/buddymon, $HOME/buddymon, $PWD)")
-	pflag.StringP("url", "U", "http://localhost:8086", "InfluxDB server URL")
-	pflag.StringP("database", "d", "buddyinfo", "InfluxDB database name to use")
-	pflag.StringP("user", "u", "", "InfluxDB username for writing")
-	pflag.StringP("password", "p", "", "InfluxDB password for user authentication")
-	pflag.StringP("measurement", "m", "buddyinfo", "InfluxDB measurement name to write")
-	tags := pflag.StringSliceP("tags", "t", []string{}, "InfluxDB tags to add, e.g. host=mycomputer (multiple -t or commas ok)")
-	pflag.Parse()
-
-	viper.BindPFlags(pflag.CommandLine)
-
-	configFile := viper.GetString("config")
-	if configFile == "" {
-		// Option -c not specified, search default paths for config file.
-		viper.AddConfigPath(".")
-		viper.AddConfigPath("$HOME/.buddymon")
-		viper.AddConfigPath("/etc/buddymon/")
-	} else {
-		viper.SetConfigFile(configFile)
-	}
-
-	err := viper.ReadInConfig()
-	if err == nil {
-		viper.WatchConfig()
-		viper.OnConfigChange(func(e fsnotify.Event) {
-			log.Println("Configuration reloaded:", e.Name)
-		})
-	}
-
-	// Set config options.
-	influxConfig.URL = viper.GetString("url")
-	influxConfig.Database = viper.GetString("database")
-	influxConfig.User = viper.GetString("user")
-	influxConfig.Password = viper.GetString("password")
-	influxConfig.Measurement = viper.GetString("measurement")
-
-	influxConfig.GlobalTags = viper.GetStringMapString("tags")
-	if len(influxConfig.GlobalTags) == 0 {
-		// Build tags from command line -t if we received them (key=val strings).
-		if len(*tags) > 0 {
-			for _, tagset := range *tags {
-				tag := strings.SplitN(tagset, "=", 2)
-				if len(tag) != 2 {
-					fmt.Fprintf(os.Stderr, "ERROR: Invalid tag '%s', use syntax tag=value\n", tagset)
-					pflag.Usage()
-					os.Exit(8)
-				}
-				influxConfig.GlobalTags[tag[0]] = tag[1]
-			}
-		}
-	}
-	log.Printf("[1]GlobalTags: %q\n", influxConfig.GlobalTags)
-
-	// TODO: Check for required options
-
-	allSettings := viper.AllSettings()
-	log.Printf("ViperSettings: %q\n", allSettings)
 }
 
 func main() {
@@ -110,14 +36,11 @@ func main() {
 	var batch []BuddyEntry
 	for _, line := range lines {
 		entry := makeBuddyEntry(line)
-		log.Printf("entry %v\n", entry)
 		batch = append(batch, entry)
 	}
-	log.Printf("batch %v\n", batch)
 	updateInflux(influxConfig, batch)
 }
 
-// func updateInflux(tags map[string]string, fields map[string]interface{}, url string) {
 func updateInflux(influx InfluxSettings, batch []BuddyEntry) {
 	c, err := client.NewHTTPClient(client.HTTPConfig{
 		Addr:     influx.URL,
@@ -151,7 +74,6 @@ func updateInflux(influx InfluxSettings, batch []BuddyEntry) {
 
 	// Add a point for each field set in the batch.
 	for _, entry := range batch {
-		// Add provided tags where applicable.
 		tags := influx.GlobalTags
 		tags["node"] = entry.Node
 		tags["zone"] = entry.Zone
@@ -165,7 +87,6 @@ func updateInflux(influx InfluxSettings, batch []BuddyEntry) {
 		t = t.Add(time.Nanosecond)
 	}
 
-	// Write the batch.
 	if err := c.Write(bp); err != nil {
 		log.Fatal(err)
 	}
