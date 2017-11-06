@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/pflag"
@@ -13,6 +14,7 @@ import (
 
 // InfluxSettings stores the required configuration to write data points to InfluxDB.
 type InfluxSettings struct {
+	Interval    time.Duration
 	URL         string
 	Database    string
 	User        string
@@ -33,6 +35,7 @@ func getConfig() InfluxSettings {
 	defaultHost = strings.ToLower(defaultHost)
 
 	pflag.StringP("config", "c", "", "Config file path (default searches /etc/buddymon, $HOME/buddymon, $PWD)")
+	pflag.DurationP("interval", "i", time.Second*10, "How often to gather metrics (units in ms, s, m, h accepted)")
 	pflag.StringP("url", "U", "http://localhost:8086", "InfluxDB server URL")
 	pflag.StringP("database", "d", "buddyinfo", "InfluxDB database name to use")
 	pflag.StringP("user", "u", "", "InfluxDB username for writing")
@@ -55,6 +58,7 @@ func getConfig() InfluxSettings {
 		viper.SetConfigFile(configFile)
 	}
 
+	// TODO: Fix OnConfigChange, currently does not repopulate influxConfig struct.
 	err = viper.ReadInConfig()
 	if err == nil {
 		viper.WatchConfig()
@@ -65,6 +69,7 @@ func getConfig() InfluxSettings {
 
 	// Set config options.
 	var influxConfig InfluxSettings
+	influxConfig.Interval = viper.GetDuration("interval")
 	influxConfig.URL = viper.GetString("url")
 	influxConfig.Database = viper.GetString("database")
 	influxConfig.User = viper.GetString("user")

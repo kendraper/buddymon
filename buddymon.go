@@ -28,6 +28,13 @@ type BuddyEntry struct {
 }
 
 func main() {
+	for {
+		processBuddyInfo()
+		time.Sleep(influxConfig.Interval)
+	}
+}
+
+func processBuddyInfo() {
 	lines, err := slurpLines(buddyPath)
 	if err != nil {
 		log.Fatal(err)
