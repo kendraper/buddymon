@@ -29,12 +29,14 @@ type BuddyEntry struct {
 
 func main() {
 	for {
-		processBuddyInfo()
+		if err := processBuddyInfo(); err != nil {
+			fmt.Println("ERROR:", err)
+		}
 		time.Sleep(influxConfig.Interval)
 	}
 }
 
-func processBuddyInfo() {
+func processBuddyInfo() error {
 	lines, err := slurpLines(buddyPath)
 	if err != nil {
 		log.Fatal(err)
@@ -42,20 +44,23 @@ func processBuddyInfo() {
 
 	var batch []BuddyEntry
 	for _, line := range lines {
-		entry := makeBuddyEntry(line)
+		entry, err := makeBuddyEntry(line)
+		if err != nil {
+			return err
+		}
 		batch = append(batch, entry)
 	}
-	updateInflux(influxConfig, batch)
+	return updateInflux(influxConfig, batch)
 }
 
-func updateInflux(influx InfluxSettings, batch []BuddyEntry) {
+func updateInflux(influx InfluxSettings, batch []BuddyEntry) error {
 	c, err := client.NewHTTPClient(client.HTTPConfig{
 		Addr:     influx.URL,
 		Username: influx.User,
 		Password: influx.Password,
 	})
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	// Create a new point batch.
@@ -64,7 +69,7 @@ func updateInflux(influx InfluxSettings, batch []BuddyEntry) {
 		Precision: "ns",
 	})
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	// Time will be incremented by a nanosecond per each data point, to
@@ -87,16 +92,14 @@ func updateInflux(influx InfluxSettings, batch []BuddyEntry) {
 
 		pt, err := client.NewPoint(influx.Measurement, tags, entry.Pages, t)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 		bp.AddPoint(pt)
 
 		t = t.Add(time.Nanosecond)
 	}
 
-	if err := c.Write(bp); err != nil {
-		log.Fatal(err)
-	}
+	return c.Write(bp)
 }
 
 /*
@@ -113,13 +116,13 @@ Node 1, zone   Normal   3888  10304    405    139     50     59     38     19   
 // Given a buddyinfo line, returns a field map for InfluxDB with node and zone.
 // Node number and zone should be handled as tags and not fields, since those
 // may be frequently queried (fields are not indexed).
-func makeBuddyEntry(line string) (entry BuddyEntry) {
+func makeBuddyEntry(line string) (entry BuddyEntry, err error) {
 	fields := strings.Fields(line)
 	n := len(fields)
 	if n != assertFieldCount {
-		panic(fmt.Sprintf(
-			"Found %d fields in %s (expected %d), offending line follows:\n%s\n",
-			n, buddyPath, assertFieldCount, line))
+		return entry, fmt.Errorf(
+			"found %d fields in %s (expected %d) in %v",
+			n, buddyPath, assertFieldCount, line)
 	}
 	node := fields[1][0] // extract e.g. 0 from "0,"
 	zone := fields[3]    // zone type, e.g. Normal
@@ -138,7 +141,7 @@ func makeBuddyEntry(line string) (entry BuddyEntry) {
 		pageOrder *= 2
 	}
 
-	return entry
+	return entry, nil
 }
 
 func slurpLines(path string) ([]string, error) {
