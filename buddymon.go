@@ -103,6 +103,7 @@ func updateInflux(influx InfluxSettings, batch []BuddyEntry) error {
 	if err := c.Write(bp); err != nil {
 		return err
 	}
+	return c.Close()
 }
 
 /*
