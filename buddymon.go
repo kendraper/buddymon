@@ -11,7 +11,7 @@ import (
 	"github.com/influxdata/influxdb/client/v2"
 )
 
-const buddyPath = "proc_buddyinfo.txt"
+const buddyPath = "/proc/buddyinfo"
 const assertFieldCount = 15 // requisite fields in each buddyinfo line
 
 var influxConfig InfluxSettings
@@ -62,6 +62,7 @@ func updateInflux(influx InfluxSettings, batch []BuddyEntry) error {
 	if err != nil {
 		return err
 	}
+	defer c.Close()
 
 	// Create a new point batch.
 	bp, err := client.NewBatchPoints(client.BatchPointsConfig{
@@ -102,7 +103,6 @@ func updateInflux(influx InfluxSettings, batch []BuddyEntry) error {
 	if err := c.Write(bp); err != nil {
 		return err
 	}
-	return c.Close()
 }
 
 /*
