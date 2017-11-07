@@ -30,7 +30,7 @@ type BuddyEntry struct {
 func main() {
 	for {
 		if err := processBuddyInfo(); err != nil {
-			fmt.Println("ERROR:", err)
+			log.Println("ERROR:", err)
 		}
 		time.Sleep(influxConfig.Interval)
 	}
@@ -39,7 +39,7 @@ func main() {
 func processBuddyInfo() error {
 	lines, err := slurpLines(buddyPath)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	var batch []BuddyEntry
@@ -99,7 +99,10 @@ func updateInflux(influx InfluxSettings, batch []BuddyEntry) error {
 		t = t.Add(time.Nanosecond)
 	}
 
-	return c.Write(bp)
+	if err := c.Write(bp); err != nil {
+		return err
+	}
+	return c.Close()
 }
 
 /*
