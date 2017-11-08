@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -141,7 +142,11 @@ func makeBuddyEntry(line string) (entry BuddyEntry, err error) {
 	pageOrder := 1
 	for _, p := range pages {
 		name := fmt.Sprintf("%dp", pageOrder)
-		entry.Pages[name] = string(p)
+		i, err := strconv.Atoi(p)
+		if err != nil {
+			return entry, err
+		}
+		entry.Pages[name] = i
 		pageOrder *= 2
 	}
 
